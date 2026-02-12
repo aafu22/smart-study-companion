@@ -23,15 +23,22 @@ HEADERS = {
 }
 
 # =========================
-# 📄 PDF TEXT EXTRACTION
+# 📄 SAFE PDF TEXT EXTRACTION (FIXED)
 # =========================
 def extract_text_from_pdf(file):
     reader = PyPDF2.PdfReader(file)
     text = ""
+
     for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text
+        try:
+            page_text = page.extract_text()
+            if page_text:
+                # Remove problematic unicode characters
+                page_text = page_text.encode("utf-8", errors="ignore").decode("utf-8")
+                text += page_text + "\n"
+        except Exception:
+            continue
+
     return text
 
 # =========================
@@ -40,10 +47,12 @@ def extract_text_from_pdf(file):
 def chunk_text(text, chunk_size=500, overlap=100):
     chunks = []
     start = 0
+
     while start < len(text):
         end = start + chunk_size
         chunks.append(text[start:end])
         start = end - overlap
+
     return chunks
 
 # =========================
@@ -58,6 +67,7 @@ def get_embeddings(texts):
             "input": texts
         }
     )
+
     data = response.json()
     embeddings = [item["embedding"] for item in data["data"]]
     return np.array(embeddings).astype("float32")
@@ -80,28 +90,39 @@ def retrieve_chunks(query, index, chunks, k=4):
     return [chunks[i] for i in indices[0]]
 
 # =========================
-# 🧠 GENERATIVE RAG ANSWER
+# 🧠 GENERATIVE RAG RESPONSE
 # =========================
 def generate_answer(context, user_request):
     prompt = f"""
 You are a smart study companion.
 
 Use ONLY the study material below as your knowledge source.
-You are allowed to GENERATE new questions or explanations
-based strictly on the concepts present in the material.
+
+You are allowed to:
+- Select relevant questions from the material
+- Rephrase or simplify questions
+- Organize them clearly
+
+STRICT FORMATTING RULES:
+- Each question must be on a NEW LINE
+- Use numbered list format only
+- Do NOT combine multiple questions on one line
+- Do NOT add explanations or paragraphs
+
+OUTPUT FORMAT:
+1. Question text
+2. Question text
+3. Question text
+...
 
 Do NOT use outside knowledge.
-Do NOT invent topics not present in the material.
+Do NOT introduce topics not present in the material.
 
 Study Material:
 {context}
 
 User Request:
 {user_request}
-
-You may rephrase, simplify, or select questions from the study material.
-Do NOT invent topics that are not present.
-
 """
 
     response = requests.post(
@@ -109,9 +130,7 @@ Do NOT invent topics that are not present.
         headers=HEADERS,
         json={
             "model": "openai/gpt-3.5-turbo",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+            "messages": [{"role": "user", "content": prompt}]
         }
     )
 
@@ -120,7 +139,7 @@ Do NOT invent topics that are not present.
 # =========================
 # 🎨 STREAMLIT UI
 # =========================
-st.set_page_config(page_title="Smart Study Companion", page_icon="📘")
+st.set_page_config(page_title="Smart Study Companion (RAG)", page_icon="📘")
 
 st.title("📘 Smart Study Companion (RAG)")
 st.caption("Generates answers and questions strictly from your study material")
@@ -149,6 +168,10 @@ if st.button("Generate Response"):
             for pdf in uploaded_files:
                 full_text += extract_text_from_pdf(pdf)
 
+            if not full_text.strip():
+                st.error("No readable text found in the uploaded PDFs.")
+                st.stop()
+
             # 2️⃣ Chunking
             chunks = chunk_text(full_text)
 
@@ -165,10 +188,8 @@ if st.button("Generate Response"):
             # 6️⃣ Generate grounded response
             output = generate_answer(context, user_request)
 
+            # 7️⃣ Force clean new-line formatting
             formatted_output = output.replace(". ", ".\n")
+
             st.markdown("### 📖 Output")
             st.text(formatted_output)
-
-
-
-            
