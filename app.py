@@ -1,5 +1,6 @@
 import streamlit as st
 import PyPDF2
+import pdfplumber
 import numpy as np
 import faiss
 import requests
@@ -23,21 +24,33 @@ HEADERS = {
 }
 
 # =========================
-# 📄 SAFE PDF TEXT EXTRACTION (FIXED)
+# 📄 ROBUST PDF TEXT EXTRACTION
 # =========================
 def extract_text_from_pdf(file):
-    reader = PyPDF2.PdfReader(file)
     text = ""
 
-    for page in reader.pages:
-        try:
+    # 1️⃣ Try PyPDF2
+    try:
+        reader = PyPDF2.PdfReader(file)
+        for page in reader.pages:
             page_text = page.extract_text()
             if page_text:
-                # Remove problematic unicode characters
                 page_text = page_text.encode("utf-8", errors="ignore").decode("utf-8")
                 text += page_text + "\n"
+    except Exception:
+        pass
+
+    # 2️⃣ Fallback to pdfplumber if PyPDF2 fails
+    if not text.strip():
+        try:
+            with pdfplumber.open(file) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        page_text = page_text.encode("utf-8", errors="ignore").decode("utf-8")
+                        text += page_text + "\n"
         except Exception:
-            continue
+            pass
 
     return text
 
@@ -99,20 +112,20 @@ You are a smart study companion.
 Use ONLY the study material below as your knowledge source.
 
 You are allowed to:
-- Select relevant questions from the material
-- Rephrase or simplify questions
-- Organize them clearly
+- Select relevant questions or points from the material
+- Rephrase or simplify content
+- Organize output clearly
 
 STRICT FORMATTING RULES:
-- Each question must be on a NEW LINE
+- Each item must be on a NEW LINE
 - Use numbered list format only
-- Do NOT combine multiple questions on one line
-- Do NOT add explanations or paragraphs
+- Do NOT merge items into paragraphs
+- Do NOT add explanations unless asked
 
 OUTPUT FORMAT:
-1. Question text
-2. Question text
-3. Question text
+1. Item
+2. Item
+3. Item
 ...
 
 Do NOT use outside knowledge.
@@ -151,7 +164,7 @@ uploaded_files = st.file_uploader(
 )
 
 user_request = st.text_input(
-    "Ask a question or request generation (e.g., 'Generate 10 easy-level questions')"
+    "Ask a question or request generation (e.g., 'Summarise the PDF' or 'Generate 10 easy-level questions')"
 )
 
 # =========================
@@ -188,7 +201,7 @@ if st.button("Generate Response"):
             # 6️⃣ Generate grounded response
             output = generate_answer(context, user_request)
 
-            # 7️⃣ Force clean new-line formatting
+            # 7️⃣ Force clean line breaks
             formatted_output = output.replace(". ", ".\n")
 
             st.markdown("### 📖 Output")
